@@ -108,7 +108,7 @@ def get_tdee(bmr, activity_level):
 
 
 def get_macros(tdee, macro_ratio_preset):
-    """Calculate target calories and macros based on TDEE and ratio preset.
+    """Calculate target calories and macros based on TDEE and ratio preset. 
     Target calories = TDEE (Maintenance)."""
     target_calories = tdee
 
@@ -179,7 +179,7 @@ def run_calculation():
     macro_ratio = st.session_state.macro_ratio
 
     if weight_kg <= 0 or height_cm <= 0 or age <= 0:
-        # st.error("Please enter valid (positive) numbers for weight, height, and age.") # Keep this check silent as it blocks the first render
+        # Keep this check silent as it blocks the first render
         st.session_state.calculated = False
         return
 
@@ -198,14 +198,13 @@ def run_calculation():
     }
     st.session_state.weight_kg = weight_kg  # Update weight for exercise tool fallback
 
-
 # FIX: New/Modified callback function for immediate dashboard update
 def update_macro_and_recalculate():
     """Callback to update the main macro ratio and rerun all calculations."""
     # The selectbox (key='macro_ratio_dashboard') value is already updated
     # We explicitly update the main state variable which run_calculation uses
     st.session_state.macro_ratio = st.session_state.macro_ratio_dashboard
-
+    
     # Rerun the calculation
     run_calculation()
 
@@ -294,24 +293,21 @@ with tab1:
 
         st.success(f"Plan calculated for goal: **Maintain Current Weight** using {macro_ratio} ratio.")
 
-        # --- NEW FEATURE: Macro Adjustment on Dashboard ---
+        # --- Macro Adjustment on Dashboard ---
         st.header("🎯 Adjust Macro Ratio")
-        col_macro = st.columns(1)[0]  # Changed from 2 columns to 1 to simplify after removing button
-
-        with col_macro:
-            # Macro Ratio Selector (Dashboard Setting) - FIXED with on_change
-            st.selectbox(
-                "Change Macro Ratio Preset (C/P/F):",
-                list(MACRO_PRESETS.keys()),
-                index=list(MACRO_PRESETS.keys()).index(st.session_state.macro_ratio),
-                key='macro_ratio_dashboard',  # Stores new value here
-                on_change=update_macro_and_recalculate,  # IMMEDIATE RE-CALCULATION
-                help="Change the ratio to instantly update your targets below."
-            )
-            # st.session_state.macro_ratio = st.session_state.macro_ratio_dashboard # REMOVED: Handled by callback
+        
+        # FIX: Added on_change callback for immediate update and removed the update button
+        st.selectbox(
+            "Change Macro Ratio Preset (C/P/F):",
+            list(MACRO_PRESETS.keys()),
+            index=list(MACRO_PRESETS.keys()).index(st.session_state.macro_ratio),
+            key='macro_ratio_dashboard',
+            on_change=update_macro_and_recalculate, # IMMEDIATE RE-CALCULATION
+            help="Change the ratio to instantly update your targets below."
+        )
 
         st.markdown("---")
-        # --- END NEW FEATURE ---
+        # --- END Macro Adjustment ---
 
         st.header("Key Daily Targets")
 
@@ -513,10 +509,12 @@ with tab3:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-        <small>Calculation: MET value of **{met}** x Weight in kg ({current_weight_kg:.1f}) x Duration in hours ({duration_hours:.2f})</small>
-        """)
+            
+        # FIX: Using st.caption for better formatting and display
+        st.caption(
+            f"**Calculation:** $\\text{{MET Value (}}{met}\\text{{)}} \\times \\text{{Weight (}}{current_weight_kg:.1f}\\text{{ kg)}} \\times \\text{{Duration (}}{duration_hours:.2f}\\text{{ hours)}}$"
+        )
+        
     else:
         st.info("Select an activity to calculate estimated calories burned.")
 
