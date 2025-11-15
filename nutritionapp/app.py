@@ -15,15 +15,6 @@ st.set_page_config(
 
 # --- GLOBAL CONSTANTS ---
 
-# Simplified Goal Adjustments for Calorie Deficit/Surplus
-GOAL_ADJUSTMENTS = {
-    "Maintain Current Weight": 0,
-    "Lose 0.5 lb / week (Gentle Deficit)": -250,
-    "Lose 1.0 lb / week (Standard Deficit)": -500,
-    "Gain 0.5 lb / week (Lean Surplus)": 250,
-    "Gain 1.0 lb / week (Standard Surplus)": 500,
-}
-
 # Standard Macro Ratios (Carbs, Protein, Fat)
 MACRO_PRESETS = {
     "Balanced (40/30/30)": (0.40, 0.30, 0.30),
@@ -116,11 +107,12 @@ def get_tdee(bmr, activity_level):
     return bmr * activity_multipliers[activity_level]
 
 
-def get_macros(tdee, calorie_adjustment, macro_ratio_preset):
-    """Calculate target calories and macros based on TDEE, adjustment, and ratio preset."""
-    target_calories = tdee + calorie_adjustment
+def get_macros(tdee, macro_ratio_preset):
+    """Calculate target calories and macros based on TDEE and ratio preset.
+    Target calories = TDEE (Maintenance)."""
+    target_calories = tdee
 
-    # Enforce minimum healthy calorie intake
+    # Enforce minimum healthy calorie intake (though TDEE usually covers this)
     if target_calories < 1200:
         target_calories = 1200
 
@@ -166,23 +158,62 @@ def calculate_bmi(weight_kg, height_cm):
     return bmi, category
 
 
-def calculate_goal_timeline(current_weight_kg, target_weight_kg, daily_calorie_deficit):
-    """Estimate the weeks required to reach a target weight."""
-    if daily_calorie_deficit <= 0: return 0
-    KCAL_PER_KG_FAT = 7700  # Approximate energy content of 1 kg of body fat
-    total_kg_to_lose = current_weight_kg - target_weight_kg
+# --- Session State Initialization ---
+if 'calculated' not in st.session_state:
+    st.session_state.calculated = False
+    st.session_state.results = {}
+    st.session_state.weight_kg = 70.0  # Default for exercise tool
+    st.session_state.macro_ratio = "Balanced (40/30/30)"  # Default macro ratio
 
-    if total_kg_to_lose <= 0: return 0
 
-    total_calorie_deficit_needed = total_kg_to_lose * KCAL_PER_KG_FAT
-    total_days = total_calorie_deficit_needed / daily_calorie_deficit
-    return math.ceil(total_days / 7)
+def run_calculation():
+    """Calculates all metrics and stores them in session state."""
+    # Retrieve base inputs from sidebar widgets
+    weight_kg = st.session_state.get('weight_kg_sidebar', 0.0)
+    height_cm = st.session_state.get('height_cm_sidebar', 0.0)
+    age = st.session_state.get('age_sidebar', 0)
+    sex = st.session_state.get('sex_sidebar', 'Male')
+    activity_level = st.session_state.get('activity_sidebar', 'Sedentary (little or no exercise)')
+
+    # Retrieve macro ratio from session state (updated by sidebar or dashboard widget)
+    macro_ratio = st.session_state.macro_ratio
+
+    if weight_kg <= 0 or height_cm <= 0 or age <= 0:
+        # st.error("Please enter valid (positive) numbers for weight, height, and age.") # Keep this check silent as it blocks the first render
+        st.session_state.calculated = False
+        return
+
+    bmr = calculate_bmr(weight_kg, height_cm, age, sex)
+    tdee = get_tdee(bmr, activity_level)
+    macros = get_macros(tdee, macro_ratio)
+    water_liters = calculate_water_intake(weight_kg)
+    bmi, bmi_category = calculate_bmi(weight_kg, height_cm)
+
+    # Store results in session state
+    st.session_state.calculated = True
+    st.session_state.results = {
+        "bmr": bmr, "tdee": tdee, "macros": macros, "water_liters": water_liters,
+        "bmi": bmi, "bmi_category": bmi_category,
+        "weight_kg": weight_kg, "macro_ratio": macro_ratio
+    }
+    st.session_state.weight_kg = weight_kg  # Update weight for exercise tool fallback
+
+
+# FIX: New/Modified callback function for immediate dashboard update
+def update_macro_and_recalculate():
+    """Callback to update the main macro ratio and rerun all calculations."""
+    # The selectbox (key='macro_ratio_dashboard') value is already updated
+    # We explicitly update the main state variable which run_calculation uses
+    st.session_state.macro_ratio = st.session_state.macro_ratio_dashboard
+
+    # Rerun the calculation
+    run_calculation()
 
 
 # --- Main App Interface ---
-st.title("🍎 Personalized Nutrition Dashboard")
+st.title("🍎 Personalized Nutrition Dashboard (Maintenance Focus)")
 st.markdown(
-    "Calculate your daily needs and macro targets based on **science and fixed, reliable ratios**.")
+    "Calculate your **Maintenance** daily calorie needs and macro targets based on **science and fixed, reliable ratios**.")
 
 # --- Sidebar Inputs ---
 with st.sidebar:
@@ -191,27 +222,31 @@ with st.sidebar:
     # --- Unit Selection ---
     unit_system = st.radio("**Unit System**", ("Metric (kg, cm)", "Imperial (lbs, ft/in)"))
 
-    weight = 0.0
-    weight_lbs = 0.0
+    weight_kg = 0.0
+    height_cm = 0.0
 
     # --- Conditional Inputs based on Unit System ---
     if unit_system == "Metric (kg, cm)":
-        weight = st.number_input("Weight (kg)", min_value=1.0, value=70.0, step=0.1)
-        height = st.number_input("Height (cm)", min_value=1.0, value=170.0, step=0.1)
+        weight = st.number_input("Weight (kg)", min_value=1.0, value=70.0, step=0.1, key='weight_kg_sidebar')
+        height = st.number_input("Height (cm)", min_value=1.0, value=170.0, step=0.1, key='height_cm_sidebar')
         weight_kg = weight
         height_cm = height
     else:  # Imperial
-        weight_lbs = st.number_input("Weight (lbs)", min_value=1.0, value=154.0, step=0.1)
+        weight_lbs = st.number_input("Weight (lbs)", min_value=1.0, value=154.0, step=0.1, key='weight_lbs_sidebar')
         col_ft, col_in = st.columns(2)
-        height_ft = col_ft.number_input("Height (ft)", min_value=0, value=5)
-        height_in = col_in.number_input("Height (in)", min_value=0, max_value=11, value=7)
+        height_ft = col_ft.number_input("Height (ft)", min_value=0, value=5, key='height_ft_sidebar')
+        height_in = col_in.number_input("Height (in)", min_value=0, max_value=11, value=7, key='height_in_sidebar')
 
         # Convert to metric for calculations
         weight_kg = weight_lbs * 0.453592
         height_cm = (height_ft * 30.48) + (height_in * 2.54)
 
-    age = st.number_input("Age", min_value=1, max_value=120, value=25)
-    sex = st.selectbox("Sex", ("Male", "Female"))
+        # Store for use in run_calculation callback
+        st.session_state['weight_kg_sidebar'] = weight_kg
+        st.session_state['height_cm_sidebar'] = height_cm
+
+    age = st.number_input("Age", min_value=1, max_value=120, value=25, key='age_sidebar')
+    sex = st.selectbox("Sex", ("Male", "Female"), key='sex_sidebar')
 
     activity_level = st.selectbox(
         "Activity Level",
@@ -221,72 +256,63 @@ with st.sidebar:
             "Moderately Active (moderate exercise/sports 3-5 days/week)",
             "Very Active (hard exercise/sports 6-7 days a week)",
             "Extra Active (very hard exercise/sports & physical job)"
-        )
+        ),
+        key='activity_sidebar'
     )
 
-    st.header("🎯 Goal Settings")
+    st.header("⚙️ Initial Macro Setting")
 
-    # Goal Adjustment Selector
-    goal_string = st.selectbox(
-        "Desired Weekly Weight Change",
-        list(GOAL_ADJUSTMENTS.keys()),
-        key='current_goal_string',
-        help="This sets your daily calorie surplus or deficit."
-    )
-    calorie_adjustment = GOAL_ADJUSTMENTS[goal_string]
-
-    # Macro Ratio Selector
-    macro_ratio = st.selectbox(
+    # Macro Ratio Selector (Initial Setting - Stored in session_state.macro_ratio)
+    macro_ratio_initial = st.selectbox(
         "Macro Ratio Preset (C/P/F)",
         list(MACRO_PRESETS.keys()),
-        key='current_macro_ratio',
+        key='macro_ratio',  # Updates st.session_state.macro_ratio
         help="Select a ratio to define your split of Carbs, Protein, and Fats."
     )
 
-    target_weight_input = 0.0
-    if "Lose" in goal_string:
-        default_val_kg = round(weight_kg * 0.9, 1)
-        default_val_units = default_val_kg if unit_system == "Metric (kg, cm)" else round(default_val_kg / 0.453592, 1)
-
-        target_weight_input = st.number_input(
-            f"Optional: Target Weight ({'kg' if unit_system == 'Metric (kg, cm)' else 'lbs'})",
-            min_value=0.0,
-            value=default_val_units,
-            step=0.1,
-            help="Set a lower target weight to estimate your timeline."
-        )
-
     st.markdown("---")
-    calculate_button = st.button("Calculate My Plan", type="primary", use_container_width=True)
 
-# --- Results Area ---
-if not calculate_button:
-    st.info("👈 Fill in your details and click 'Calculate My Plan' in the sidebar to see your personalized dashboard.")
-else:
-    # --- 1. Perform All Calculations (if inputs are valid) ---
-    if weight_kg <= 0 or height_cm <= 0 or age <= 0:
-        st.error("Please enter valid (positive) numbers for weight, height, and age.")
-        st.stop()
+    st.button("Calculate My Plan", on_click=run_calculation, type="primary", use_container_width=True)
 
-    bmr = calculate_bmr(weight_kg, height_cm, age, sex)
-    tdee = get_tdee(bmr, activity_level)
-    macros = get_macros(tdee, calorie_adjustment, macro_ratio)
-    water_liters = calculate_water_intake(weight_kg)
-    bmi, bmi_category = calculate_bmi(weight_kg, height_cm)
+# --- Tabs Structure (Always visible) ---
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard & Macros", "🔬 Calorie Science", "🏃‍♂️ Exercise Tools"])
 
-    timeline_weeks = 0
-    target_weight_kg = 0
-    if "Lose" in goal_string and target_weight_input > 0:
-        target_weight_kg = target_weight_input if unit_system == "Metric (kg, cm)" else target_weight_input * 0.453592
-        if target_weight_kg < weight_kg:
-            timeline_weeks = calculate_goal_timeline(weight_kg, target_weight_kg, abs(calorie_adjustment))
+# --- TAB 1: DASHBOARD & MACROS ---
+with tab1:
+    if not st.session_state.calculated:
+        st.info(
+            "👈 Fill in your details and click 'Calculate My Plan' in the sidebar to see your personalized dashboard.")
+    else:
+        # Retrieve results from session state
+        res = st.session_state.results
+        macros = res['macros']
+        water_liters = res['water_liters']
+        bmi = res['bmi']
+        bmi_category = res['bmi_category']
+        macro_ratio = res['macro_ratio']
+        target_calories = math.floor(macros["calories"])
 
-    # --- 2. Create UI with Tabs ---
-    tab1, tab2, tab3 = st.tabs(["📊 Dashboard & Macros", "🔬 Calorie Science & Timeline", "🏃‍♂️ Exercise Tools"])
+        st.success(f"Plan calculated for goal: **Maintain Current Weight** using {macro_ratio} ratio.")
 
-    # --- TAB 1: DASHBOARD & MACROS ---
-    with tab1:
-        st.success(f"Plan calculated for goal: **{goal_string}**")
+        # --- NEW FEATURE: Macro Adjustment on Dashboard ---
+        st.header("🎯 Adjust Macro Ratio")
+        col_macro = st.columns(1)[0]  # Changed from 2 columns to 1 to simplify after removing button
+
+        with col_macro:
+            # Macro Ratio Selector (Dashboard Setting) - FIXED with on_change
+            st.selectbox(
+                "Change Macro Ratio Preset (C/P/F):",
+                list(MACRO_PRESETS.keys()),
+                index=list(MACRO_PRESETS.keys()).index(st.session_state.macro_ratio),
+                key='macro_ratio_dashboard',  # Stores new value here
+                on_change=update_macro_and_recalculate,  # IMMEDIATE RE-CALCULATION
+                help="Change the ratio to instantly update your targets below."
+            )
+            # st.session_state.macro_ratio = st.session_state.macro_ratio_dashboard # REMOVED: Handled by callback
+
+        st.markdown("---")
+        # --- END NEW FEATURE ---
+
         st.header("Key Daily Targets")
 
         col1, col2, col3, col4 = st.columns(4)
@@ -294,7 +320,7 @@ else:
         # Displaying key metrics with the custom style
         with col1:
             st.markdown(
-                f'<div class="metric-card">Target Calories<div style="font-size: 2rem; font-weight: 800; color: #FF6B6B;">{math.floor(macros["calories"])} kcal</div><p style="font-size: 0.9rem; color: #999999;">{calorie_adjustment:+d} kcal Adjustment</p></div>',
+                f'<div class="metric-card">Target Calories<div style="font-size: 2rem; font-weight: 800; color: #FF6B6B;">{target_calories} kcal</div><p style="font-size: 0.9rem; color: #999999;">Maintenance Level (TDEE)</p></div>',
                 unsafe_allow_html=True)
 
         with col2:
@@ -383,14 +409,64 @@ else:
                 }
             )
 
-    # --- TAB 2: CALORIE SCIENCE & TIMELINE ---
-    with tab2:
+        # --- DUMMY DIET PLAN FEATURE ---
+        st.markdown("---")
+        st.header("🍽️ Suggested Meal Distribution (Dummy Plan)")
+        st.warning(
+            "This is a simple template to distribute your macros. Food choices must be made by the user to meet these targets.")
+
+        # Define the macro split across meals (e.g., 25/40/35 for Calories)
+        MEAL_SPLIT = {
+            "Breakfast": 0.25,  # 25%
+            "Lunch": 0.40,  # 40%
+            "Dinner": 0.35  # 35%
+        }
+
+        meal_data = []
+        for meal, ratio in MEAL_SPLIT.items():
+            meal_macros = {
+                "Meal": meal,
+                "Est. Calories (kcal)": math.floor(target_calories * ratio),
+                "Protein (g)": round(macros['protein_g'] * ratio, 1),
+                "Carbs (g)": round(macros['carbs_g'] * ratio, 1),
+                "Fats (g)": round(macros['fat_g'] * ratio, 1)
+            }
+            meal_data.append(meal_macros)
+
+        df_meals = pd.DataFrame(meal_data)
+
+        st.dataframe(
+            df_meals,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Est. Calories (kcal)": st.column_config.NumberColumn("Est. Calories (kcal)", format="%.0f"),
+                "Protein (g)": st.column_config.NumberColumn("Protein (g)", format="%.1f"),
+                "Carbs (g)": st.column_config.NumberColumn("Carbs (g)", format="%.1f"),
+                "Fats (g)": st.column_config.NumberColumn("Fats (g)", format="%.1f"),
+            }
+        )
+
+        st.caption(
+            f"Total Daily Macros: {math.floor(macros['protein_g'])}g Protein, {math.floor(macros['carbs_g'])}g Carbs, {math.floor(macros['fat_g'])}g Fats.")
+        # --- END DUMMY DIET PLAN FEATURE ---
+
+# --- TAB 2: CALORIE SCIENCE ---
+with tab2:
+    if not st.session_state.calculated:
+        st.info("👈 Please calculate your plan in the sidebar to view your calorie science details.")
+    else:
+        res = st.session_state.results
+        bmr = res['bmr']
+        tdee = res['tdee']
+        macros = res['macros']
+
         st.header("🔬 The Science Behind Your Calories")
         st.info(
-            "Understanding your Basal Metabolic Rate (BMR) and Total Daily Energy Expenditure (TDEE) is essential for any goal.")
+            "Understanding your Basal Metabolic Rate (BMR) and Total Daily Energy Expenditure (TDEE) is essential for your maintenance calories.")
 
         # Display BMR vs TDEE with a progress bar style
-        st.subheader("Maintenance vs. Target")
+        st.subheader("BMR vs. TDEE")
 
         # Determine the maximum value for the bar chart
         max_cal = max(macros['calories'], tdee, 2500)
@@ -402,68 +478,49 @@ else:
             f"**Total Daily Energy Expenditure (TDEE):** Energy burned including activity (Your Maintenance Calories).")
         st.progress(tdee / max_cal, text=f"**{round(tdee, 0):.0f} kcal**")
 
-        st.markdown(f"**Target Calories:** TDEE adjusted by {calorie_adjustment:+d} kcal for your goal.")
+        st.markdown(f"**Target Calories:** This is equal to your TDEE for maintenance.")
         st.progress(macros['calories'] / max_cal, text=f"**{math.floor(macros['calories'])} kcal**")
 
-        # --- Timeline Feature ---
-        if timeline_weeks > 0:
-            st.markdown("---")
-            st.header("📅 Estimated Goal Timeline")
+# --- TAB 3: EXERCISE TOOLS ---
+with tab3:
+    # Use the weight from the sidebar (current_weight_kg)
+    current_weight_kg = st.session_state.get('weight_kg_sidebar', 70.0)
 
-            # Metric Card for Timeline
+    st.header("🏃‍♂️ Exercise Calorie Estimator")
+    st.markdown(
+        f"Use your **current weight ({current_weight_kg:.1f} kg)** and the Metabolic Equivalent of Task (MET) values to estimate calories burned.")
+
+    col_act, col_dur, col_burn = st.columns([2, 1, 1])
+
+    with col_act:
+        activity = st.selectbox("Select Activity:", options=list(MET_VALUES.keys()), key='activity_select_tab3')
+    with col_dur:
+        duration = st.number_input("Duration (minutes):", min_value=1, value=30, key='duration_input_tab3')
+
+    if activity != "Select an activity...":
+        met = MET_VALUES.get(activity, 0.0)
+        duration_hours = duration / 60.0
+        calories_burned = math.floor(met * current_weight_kg * duration_hours)
+
+        with col_burn:
             st.markdown(f"""
-            <div class="metric-card" style="border-left: 5px solid #8FBC8F;">
-                <p style="font-size: 1.1rem; color: #B0B0B0; margin-bottom: 5px;">
-                    Time to reach **{target_weight_kg:.1f} kg**
+            <div class="metric-card" style="background-color: #2a2a2a; border-left: 5px solid #00BFFF;">
+                <p style="font-size: 1rem; color: #B0B0B0; margin-bottom: 5px;">
+                    Est. Calories Burned
                 </p>
-                <div style="font-size: 2.5rem; font-weight: 700; color: #8FBC8F;">
-                    {timeline_weeks} Weeks
+                <div style="font-size: 2rem; font-weight: 700; color: #00BFFF;">
+                    {calories_burned} kcal
                 </div>
-                <p style="font-size: 0.9rem; color: #6C757D;">
-                    Based on your **{abs(calorie_adjustment)} kcal daily deficit**.
-                </p>
             </div>
             """, unsafe_allow_html=True)
-        elif "Lose" in goal_string and target_weight_input > 0 and target_weight_kg >= weight_kg:
-            st.warning("Your target weight must be lower than your current weight to calculate a timeline.")
 
-    # --- TAB 3: EXERCISE TOOLS ---
-    with tab3:
-        st.header("🏃‍♂️ Exercise Calorie Estimator")
-        st.markdown(
-            f"Use your **current weight ({weight_kg:.1f} kg)** and the Metabolic Equivalent of Task (MET) values to estimate calories burned.")
+        st.markdown(f"""
+        <small>Calculation: MET value of **{met}** x Weight in kg ({current_weight_kg:.1f}) x Duration in hours ({duration_hours:.2f})</small>
+        """)
+    else:
+        st.info("Select an activity to calculate estimated calories burned.")
 
-        col_act, col_dur, col_burn = st.columns([2, 1, 1])
-
-        with col_act:
-            activity = st.selectbox("Select Activity:", options=list(MET_VALUES.keys()), key='activity_select')
-        with col_dur:
-            duration = st.number_input("Duration (minutes):", min_value=1, value=30, key='duration_input')
-
-        if activity != "Select an activity...":
-            met = MET_VALUES.get(activity, 0.0)
-            duration_hours = duration / 60.0
-            calories_burned = math.floor(met * weight_kg * duration_hours)
-
-            with col_burn:
-                st.markdown(f"""
-                <div class="metric-card" style="background-color: #2a2a2a; border-left: 5px solid #00BFFF;">
-                    <p style="font-size: 1rem; color: #B0B0B0; margin-bottom: 5px;">
-                        Est. Calories Burned
-                    </p>
-                    <div style="font-size: 2rem; font-weight: 700; color: #00BFFF;">
-                        {calories_burned} kcal
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown(f"""
-            <small>Calculation: MET value of **{met}** x Weight in kg ({weight_kg:.1f}) x Duration in hours ({duration_hours:.2f})</small>
-            """)
-        else:
-            st.info("Select an activity to calculate estimated calories burned.")
-
-    st.markdown("---")
-    st.warning(
-        "**Disclaimer:** This calculator provides estimates based on scientific formulas and generalized MET values. It is not medical or professional dietetic advice. Consult a healthcare professional before making significant changes to your diet or fitness routine.",
-        icon="⚠️")
+st.markdown("---")
+st.warning(
+    "**Disclaimer:** This calculator provides estimates based on scientific formulas and generalized MET values. It is not medical or professional dietetic advice. Consult a healthcare professional before making significant changes to your diet or fitness routine.",
+    icon="⚠️")
